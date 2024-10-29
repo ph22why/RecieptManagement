@@ -1,0 +1,13 @@
+빌드 파일 확인
+cd ~/my-project/build/
+
+경로 확인
+ls /var/www/receipt-management/build
+
+새 build 복사
+
+서비스 재시작
+sudo systemctl restart nginx
+
+권한 해결 (필요시)
+sudo chown -R www-data:www-data /var/www/receipt-management/build/
