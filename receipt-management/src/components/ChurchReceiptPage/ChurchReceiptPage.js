@@ -1,60 +1,128 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import moment from "moment";
 
-const ChurchReceiptPage = () => {
-  const [churchNumber, setChurchNumber] = useState("");
-  const [churchName, setChurchName] = useState(""); // 교회 이름 입력 필드 추가
-  const [churchData, setChurchData] = useState(null);
-  const [churchNumberOrName, setChurchNumberOrName] = useState(""); // 입력 필드 하나로 합침
+const BASE_URL =
+  process.env.NODE_ENV === "production"
+    ? "http://www.awanaevent.com"
+    : "http://localhost";
 
-  // 교회 데이터를 검색하는 함수
-  const handleFetchReceipt = async () => {
+const eventCodeMapping = {
+  YS: "영성수련회",
+  BQF: "성경퀴즈대회 설명회",
+  BQ: "성경퀴즈대회",
+  AMC: "컨퍼런스",
+  BT1: "상반기 비티",
+  BT2: "하반기 비티",
+  BT: "수시비티",
+  OLF: "올림픽 설명회",
+  OL: "올림픽",
+  TC: "티앤티 캠프",
+  DC: "감독관학교",
+  CC1: "조정관학교 101",
+  CC2: "조정관학교 201",
+  NR: "신규등록",
+  RR: "재등록",
+  ETC: "기타이벤트",
+};
+
+const ChurchReceiptPage = () => {
+  const [churchData, setChurchData] = useState(null);
+  const [churchNumberOrName, setChurchNumberOrName] = useState("");
+  const [events, setEvents] = useState([]);
+  const [years, setYears] = useState([]);
+  const [selectedYear, setSelectedYear] = useState("");
+  const [selectedEvent, setSelectedEvent] = useState("");
+  const [fixedYear, setFixedYear] = useState("");
+  const [fixedEvent, setFixedEvent] = useState("");
+
+  useEffect(() => {
+    const fetchEvents = async () => {
+      try {
+        const response = await fetch(`${BASE_URL}:8080/admin/events`);
+        const data = await response.json();
+
+        setEvents(data);
+
+        // Extract and deduplicate years
+        const uniqueYears = [...new Set(data.map((event) => event.event_year))];
+        setYears(uniqueYears);
+      } catch (error) {
+        console.error("Error fetching events:", error);
+      }
+    };
+
+    fetchEvents();
+  }, []);
+
+  const handleCustomFetchReceipt = async () => {
     try {
-      const searchTerm = churchNumberOrName.trim(); // 입력값을 받아서 공백을 제거
+      const searchTerm = churchNumberOrName.trim();
 
       let queryParam;
-      // 숫자면 CHURCHNUMBER, 아니면 CHURCHNAME으로 검색
       if (!isNaN(searchTerm)) {
         queryParam = `churchNumber=${searchTerm}`;
       } else {
         queryParam = `churchName=${searchTerm}`;
       }
 
+      if (!selectedYear || !selectedEvent) {
+        throw new Error("이벤트 연도와 이름을 선택하세요.");
+      }
+
       const response = await fetch(
-        `http://www.awanaevent.com:8080/public/events/search?${queryParam}`
+        `${BASE_URL}:8080/public/events/custom-search?${queryParam}&eventYear=${selectedYear}&eventName=${selectedEvent}`
       );
 
       if (!response.ok) {
-        throw new Error("Church not found or event is not public");
+        throw new Error("검색 실패. 입력한 정보를 확인해주세요.");
       }
-
+      setFixedYear(selectedYear);
+      setFixedEvent(selectedEvent);
       const data = await response.json();
-
-      if (data.length === 0) {
-        throw new Error("No matching public event found");
-      }
-
-      setChurchData(data[0]); // 교회 데이터 저장 (첫 번째 데이터만 사용)
+      setChurchData(data[0]);
     } catch (error) {
       alert(error.message);
     }
   };
 
-  // 내역 코드 변환 함수
+  // // 공개된 이벤트에서 조회
+  // const handleFetchReceipt = async () => {
+  //   try {
+  //     const searchTerm = churchNumberOrName.trim();
+  //     let queryParam;
+  //     if (!isNaN(searchTerm)) {
+  //       queryParam = `churchNumber=${searchTerm}`;
+  //     } else {
+  //       queryParam = `churchName=${searchTerm}`;
+  //     }
+
+  //     const response = await fetch(
+  //       `${BASE_URL}:8080/public/events/search?${queryParam}`
+  //     );
+
+  //     if (!response.ok) {
+  //       throw new Error("검색 실패. 교회번호 혹은 교회명을 확인해주세요.");
+  //     }
+
+  //     const data = await response.json();
+
+  //     if (data.length === 0) {
+  //       throw new Error("공개된 이벤트가 없습니다. 본부로 문의해주세요");
+  //     }
+
+  //     setChurchData(data[0]);
+  //   } catch (error) {
+  //     alert(error.message);
+  //   }
+  // };
+
   const getEventName = (code) => {
-    if (!code) return "영성수련회 참가비"; // code 값이 없을 경우 기본값 반환
-    switch (code.toUpperCase()) {
-      case "RS":
-        return "영성수련회 참가비";
-      default:
-        return "영성수련회 참가비"; // 코드가 없거나 매칭되지 않으면 '알 수 없음'
-    }
+    return eventCodeMapping[code.toUpperCase()] || "알 수 없음";
   };
 
-  // 내역 (년도-코드) 반환 함수
-  const getEventDetails = (tableYear, eventCode) => {
-    const year = tableYear || moment().format("YYYY"); // tableYear 값이 없으면 현재 연도 사용
-    const eventName = getEventName(eventCode);
+  const getEventDetails = (selectedYear, selectedEvent) => {
+    const year = selectedYear || moment().format("YYYY");
+    const eventName = selectedEvent;
     return `${year}-${eventName}`;
   };
 
@@ -66,29 +134,71 @@ const ChurchReceiptPage = () => {
     document.body.innerHTML = printContents;
     window.print();
     document.body.innerHTML = originalContents;
-    window.location.reload(); // 페이지를 새로고침하여 원래 상태로 복구
+    window.location.reload();
   };
 
   return (
     <div style={styles.container}>
       <h1 style={styles.header}>영수증 출력 페이지</h1>
-      <h4>교회등록번호 및 교회명을 입력하세요</h4>
-      <div style={styles.inputContainer}>
-        <input
-          type="text"
-          value={churchNumberOrName}
-          onChange={(e) => setChurchNumberOrName(e.target.value)} // 하나의 입력 필드 사용
-          placeholder="교회 번호 혹은 교회명을 입력하세요"
-          style={styles.input}
-        />
-        <button onClick={handleFetchReceipt} style={styles.button}>
-          영수증 조회
-        </button>
-      </div>
+      <h4 style={{ marginBottom: "0px", textAlign: "center" }}>
+        출력하실 영수증의 이벤트 연도, 항목, 교회번호or교회명으로 검색해주세요
+      </h4>
+      <h5 style={{ marginBottom: "40px" }}>
+        조회가 안될시 본부로 문의하세요 031-711-6533
+      </h5>
+      {/* 연도 및 이벤트 선택 드롭다운 */}
+      <div style={styles.dropdownContainer}>
+        <select
+          value={selectedYear}
+          onChange={(e) => setSelectedYear(e.target.value)}
+          style={styles.yeardropdown}
+        >
+          <option value="">이벤트 연도</option>
+          {years.map((year) => (
+            <option key={year} value={year}>
+              {year}
+            </option>
+          ))}
+        </select>
 
+        <select
+          value={selectedEvent}
+          onChange={(e) => setSelectedEvent(e.target.value)}
+          style={styles.namedropdown}
+        >
+          <option value="">이벤트 이름</option>
+          {events.map((event) => (
+            <option key={event.event_name} value={event.event_name}>
+              {getEventName(event.event_name)}
+            </option>
+          ))}
+        </select>
+        <div style={styles.inputContainer}>
+          <input
+            type="text"
+            value={churchNumberOrName}
+            onChange={(e) => setChurchNumberOrName(e.target.value)}
+            placeholder="교회번호 혹은 교회명 입력"
+            style={styles.input}
+          />
+          <button onClick={handleCustomFetchReceipt} style={styles.button}>
+            영수증 조회
+          </button>
+        </div>
+      </div>
       {churchData && (
         <>
-          <div id="receipt-container">
+          <button
+            className="print-button"
+            onClick={printReceipt}
+            style={styles.printbutton}
+          >
+            인쇄 및 저장
+          </button>
+          <div
+            id="receipt-container"
+            style={{ position: "relative", left: "-6%" }}
+          >
             <div id="receipt-content" style={styles.receiptContainer}>
               <h2 style={styles.receiptTitle}>영수증 (RECEIPT)</h2>
               <table style={styles.table}>
@@ -105,10 +215,7 @@ const ChurchReceiptPage = () => {
                   <tr>
                     <td style={styles.tableHeader}>내역 (Event)</td>
                     <td style={styles.tableCell}>
-                      {getEventDetails(
-                        churchData.TABLE_YEAR, // 해당 년도
-                        churchData.CODE // 코드에 대응하는 이름
-                      )}
+                      {fixedYear}-{getEventName(fixedEvent)}
                     </td>
                   </tr>
                   <tr>
@@ -116,14 +223,16 @@ const ChurchReceiptPage = () => {
                     <td style={styles.tableCell}>{churchData.CHURCHNAME}</td>
                   </tr>
                   <tr>
-                    <td style={styles.tableHeader}>참가자 수 (Participants)</td>
+                    <td style={styles.tableHeader}>비고 (Participants)</td>
                     <td style={styles.tableCell}>
-                      {churchData.PARTICIPANTS}명
+                      {churchData.PARTICIPANTS}
                     </td>
                   </tr>
                   <tr>
                     <td style={styles.tableHeader}>금액 (Amount)</td>
-                    <td style={styles.tableCell}>{churchData.COST}원</td>
+                    <td style={styles.tableCell}>
+                      {new Intl.NumberFormat().format(churchData.COST)}원
+                    </td>
                   </tr>
                   <tr>
                     <td colSpan="2" style={styles.tableNotice}>
@@ -148,13 +257,6 @@ const ChurchReceiptPage = () => {
               </div>
             </div>
           </div>
-          <button
-            className="print-button"
-            onClick={printReceipt}
-            style={styles.button}
-          >
-            영수증 출력
-          </button>
         </>
       )}
     </div>
@@ -170,6 +272,33 @@ const styles = {
     fontFamily: "Arial, sans-serif",
     backgroundColor: "#fff",
   },
+  dropdownContainer: {
+    position:"relative",
+    left:"8%",
+    flexWrap: "wrap",
+    display: "flex",
+    height: "40px",
+    marginBottom: "20px",
+  },
+  yeardropdown: {
+    width:"10%",
+    padding: "10px",
+    fontSize: "16px",
+    borderRadius: "4px",
+    border: "1px solid #ccc",
+    minWidth: "150px", // 최소 너비 설정
+    marginBottom: "10px", // 여백 추가
+    marginRight:"10px"
+  },
+  namedropdown: {
+    width:"30%",
+    padding: "10px",
+    fontSize: "16px",
+    borderRadius: "4px",
+    border: "1px solid #ccc",
+    minWidth: "150px", // 최소 너비 설정
+    marginBottom: "10px", // 여백 추가
+  },
   header: {
     fontSize: "24px",
     marginBottom: "20px",
@@ -177,7 +306,7 @@ const styles = {
   inputContainer: {
     display: "flex",
     alignItems: "center",
-    marginBottom: "20px",
+    width: "100%",
   },
   input: {
     padding: "10px",
@@ -188,13 +317,13 @@ const styles = {
   },
   button: {
     padding: "10px 20px",
+    width: "140px",
     fontSize: "16px",
     backgroundColor: "#007bff",
     color: "#fff",
     border: "none",
     borderRadius: "4px",
     cursor: "pointer",
-    marginTop: "20px",
   },
   receiptContainer: {
     textAlign: "left",
@@ -256,6 +385,20 @@ const styles = {
     right: "200px",
     top: "50%",
     transform: "translateY(-50%)",
+  },
+  printbutton: {
+    position:"relative",
+    top:"-10px",
+    left:"280px",
+    padding: "10px 20px",
+    width: "140px",
+    marginBottom: "10px",
+    fontSize: "16px",
+    backgroundColor: "grey",
+    color: "#fff",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
   },
 };
 

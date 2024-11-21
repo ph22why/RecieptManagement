@@ -14,7 +14,15 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Snackbar,
+  CircularProgress,
 } from "@mui/material";
+import * as XLSX from "xlsx";
+
+const BASE_URL =
+  process.env.NODE_ENV === "production"
+    ? "http://www.awanaevent.com"
+    : "http://localhost";
 
 const AdminPage = () => {
   const [events, setEvents] = useState([]);
@@ -28,11 +36,34 @@ const AdminPage = () => {
   const [openConfirmDialog, setOpenConfirmDialog] = useState(false); // 저장 확인 팝업
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false); // 삭제 확인 팝업
   const [deleteRowId, setDeleteRowId] = useState(null); // 삭제할 행의 ID 저장
+  const [isLoading, setIsLoading] = useState(false); // 로딩 상태
+  const [error, setError] = useState(""); // 에러 메시지 상태
+  const [openSnackbar, setOpenSnackbar] = useState(false); // 스낵바 열기 상태
+
+  // 이벤트 매핑 데이터
+  const eventMapping = [
+    { code: "YS", name: "영성수련회" },
+    { code: "BQF", name: "성경퀴즈대회 설명회" },
+    { code: "BQ", name: "성경퀴즈대회" },
+    { code: "AMC", name: "컨퍼런스" },
+    { code: "BT1", name: "상반기 비티" },
+    { code: "BT2", name: "하반기 비티" },
+    { code: "BT", name: "수시비티" },
+    { code: "OLF", name: "올림픽 설명회" },
+    { code: "OL", name: "올림픽" },
+    { code: "TC", name: "티앤티 캠프" },
+    { code: "DC", name: "감독관학교" },
+    { code: "CC1", name: "조정관학교 101" },
+    { code: "CC2", name: "조정관학교 201" },
+    { code: "NR", name: "신규등록" },
+    { code: "RR", name: "재등록" },
+    { code: "ETC", name: "기타이벤트" },
+  ];
 
   // 서버에서 이벤트 목록을 가져오는 함수
   const fetchEvents = async () => {
     try {
-      const response = await fetch("http://www.awanaevent.com:8080/admin/events");
+      const response = await fetch(`${BASE_URL}:8080/admin/events`);
       const data = await response.json();
       setEvents(data);
     } catch (error) {
@@ -40,11 +71,24 @@ const AdminPage = () => {
     }
   };
 
+  // 이벤트 데이터 엑셀로 내보내기
+  const exportToExcel = () => {
+    const filteredData = eventData.filter(filterValidRows);
+
+    // 필터링된 데이터를 시트 형식으로 변환
+    const worksheet = XLSX.utils.json_to_sheet(filteredData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Filtered Event Data");
+
+    // 엑셀 파일 다운로드
+    XLSX.writeFile(workbook, `${selectedEvent.event_name}_filtered_data.xlsx`);
+  };
+
   // 이벤트 공개 여부 설정
   const handleSetPublic = async (eventId, isPublic) => {
     try {
       const response = await fetch(
-        `http://www.awanaevent.com:8080/admin/events/${eventId}/public`,
+        `${BASE_URL}:8080/admin/events/${eventId}/public`,
         {
           method: "PUT",
           headers: {
@@ -65,6 +109,12 @@ const AdminPage = () => {
     }
   };
 
+  // Snackbar 닫기
+  const handleSnackbarClose = () => {
+    setOpenSnackbar(false);
+    setError("");
+  };
+
   // 수정된 데이터를 저장하는 함수
   const handleSaveRow = async () => {
     if (!selectedEvent) {
@@ -74,7 +124,7 @@ const AdminPage = () => {
 
     try {
       const response = await fetch(
-        `http://www.awanaevent.com:8080/admin/events/${selectedEvent.id}/data/${editRow.id}`,
+        `${BASE_URL}:8080/admin/events/${selectedEvent.id}/data/${editRow.id}`,
         {
           method: "PUT",
           headers: {
@@ -104,7 +154,7 @@ const AdminPage = () => {
   const fetchEventData = async (eventId) => {
     try {
       const response = await fetch(
-        `http://www.awanaevent.com:8080/admin/events/${eventId}/data`
+        `${BASE_URL}:8080/admin/events/${eventId}/data`
       );
       const data = await response.json();
 
@@ -172,7 +222,7 @@ const AdminPage = () => {
   const handleDeleteRow = async (rowId) => {
     try {
       const response = await fetch(
-        `http://www.awanaevent.com:8080/admin/events/${selectedEvent.id}/data/${rowId}`,
+        `${BASE_URL}:8080/admin/events/${selectedEvent.id}/data/${rowId}`,
         {
           method: "DELETE",
         }
@@ -191,7 +241,7 @@ const AdminPage = () => {
 
   // 교회 데이터 유효성 확인 함수 (CHURCHNAME 및 CHURCHNUMBER가 존재하는지 확인)
   const filterValidRows = (row) => {
-    return row["CHURCHNAME"] && row["CHURCHNUMBER"];
+    return row["CHURCHNAME"] || row["CHURCHNUMBER"];
   };
 
   // 개별 추가 버튼 클릭 시 빈 데이터 생성
@@ -222,7 +272,7 @@ const AdminPage = () => {
   const handleSaveNewRow = async () => {
     try {
       const response = await fetch(
-        `http://www.awanaevent.com:8080/admin/events/${selectedEvent.id}/data`,
+        `${BASE_URL}:8080/admin/events/${selectedEvent.id}/data`,
         {
           method: "POST",
           headers: {
@@ -250,57 +300,67 @@ const AdminPage = () => {
       <Typography variant="h4" gutterBottom>
         이벤트 관리 페이지
       </Typography>
-
       {/* 이벤트 목록 */}
-      <TableContainer component={Paper} style={{ marginTop: 32 }}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>이벤트 이름</TableCell>
-              <TableCell>이벤트 연도</TableCell>
-              <TableCell>공개 여부</TableCell>
-              <TableCell>공개 설정</TableCell>
-              <TableCell>데이터 조회</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {events.map((event) => (
-              <TableRow key={event.id}>
-                <TableCell>{event.event_name}</TableCell>
-                <TableCell>{event.event_year}</TableCell>
-                <TableCell>{event.is_public ? "공개" : "비공개"}</TableCell>
-                <TableCell>
-                  <Button
-                    variant="contained"
-                    color={event.is_public ? "secondary" : "primary"}
-                    onClick={() =>
-                      handleSetPublic(event.id, event.is_public ? 0 : 1)
-                    }
-                  >
-                    {event.is_public ? "비공개로 설정" : "공개로 설정"}
-                  </Button>
-                </TableCell>
-                <TableCell>
-                  <Button
-                    variant="contained"
-                    onClick={() => handleSelectEvent(event)}
-                  >
-                    데이터 조회
-                  </Button>
-                </TableCell>
+      {isLoading ? (
+        <CircularProgress />
+      ) : (
+        <TableContainer component={Paper} style={{ marginTop: 32 }}>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>이벤트 이름</TableCell>
+                <TableCell>이벤트 연도</TableCell>
+                <TableCell>공개 여부</TableCell>
+                <TableCell>공개 설정</TableCell>
+                <TableCell>데이터 조회</TableCell>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
+            </TableHead>
+            <TableBody>
+              {events.map((event) => (
+                <TableRow key={event.id}>
+                  <TableCell>
+                    {eventMapping.find(
+                      (mapping) => mapping.code === event.event_name
+                    )?.name || event.event_name}
+                  </TableCell>
+                  <TableCell>{event.event_year}</TableCell>
+                  <TableCell>{event.is_public ? "공개" : "비공개"}</TableCell>
+                  <TableCell>
+                    <Button
+                      variant="contained"
+                      color={event.is_public ? "secondary" : "primary"}
+                      onClick={() =>
+                        handleSetPublic(event.id, event.is_public ? 0 : 1)
+                      }
+                    >
+                      {event.is_public ? "비공개로 설정" : "공개로 설정"}
+                    </Button>
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="contained"
+                      onClick={() => handleSelectEvent(event)}
+                    >
+                      데이터 조회
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
 
+      {/* Snackbar for Error/Success Messages */}
+      <Snackbar
+        open={openSnackbar}
+        autoHideDuration={6000}
+        onClose={handleSnackbarClose}
+        message={error}
+      />
       {/* 선택된 이벤트 데이터 조회 */}
       {selectedEvent && (
         <div style={{ marginTop: 32 }}>
-          <Typography variant="h5" gutterBottom>
-            {selectedEvent.event_name} 데이터 관리
-          </Typography>
-
           <Button
             variant="contained"
             color={isAddingRow ? "secondary" : "primary"}
@@ -308,6 +368,15 @@ const AdminPage = () => {
             style={{ marginBottom: 16 }}
           >
             {isAddingRow ? "취소" : "개별 추가"}
+          </Button>
+
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={exportToExcel} // 엑셀 다운로드 버튼
+            style={{ marginBottom: 16, marginLeft: 16 }}
+          >
+            엑셀 다운로드
           </Button>
 
           <TableContainer component={Paper} style={{ marginTop: 16 }}>
@@ -397,7 +466,6 @@ const AdminPage = () => {
           </TableContainer>
         </div>
       )}
-
       {/* 저장 확인 팝업 */}
       <Dialog open={openConfirmDialog} onClose={handleCancelDialog}>
         <DialogTitle>저장 확인</DialogTitle>
@@ -411,7 +479,6 @@ const AdminPage = () => {
           </Button>
         </DialogActions>
       </Dialog>
-
       {/* 삭제 확인 팝업 */}
       <Dialog open={openDeleteDialog} onClose={handleCancelDialog}>
         <DialogTitle>삭제 확인</DialogTitle>

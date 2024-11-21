@@ -1,3 +1,53 @@
+node:
+1. 서비스 파일 생성
+sudo nano /etc/systemd/system/node-app.service
+
+2. 서비스 파일 설정
+[Unit]
+Description=Node.js Application
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/node /path/to/your/app.js
+# Node.js 앱의 실행 경로와 Node.js 설치 경로를 설정합니다.
+Restart=always
+User=www-data
+Group=www-data
+Environment=PORT=8080
+WorkingDirectory=/path/to/your
+# 위에 앱이 위치한 디렉토리 경로로 수정하세요.
+
+[Install]
+WantedBy=multi-user.target
+
+3. 저장
+Ctrl + O를 눌러 파일을 저장한 후 Enter 키를 누르고, Ctrl + X를 눌러 편집기를 종료합니다.
+
+4. 서비스 리로드 및 시작
+sudo systemctl daemon-reload
+sudo systemctl start node-app
+
+5. 서비스 상태 확인
+sudo systemctl status node-app
+
+6. 서버 재부팅 시 자동 시작 설정
+sudo systemctl enable node-app
+
+7. 로그 확인
+journalctl -u node-app
+
+
+8. 서비스 관리 명령
+서비스 중지:
+sudo systemctl stop node-app
+서비스 재시작:
+sudo systemctl restart node-app
+서비스 비활성화 (자동 시작 해제):
+sudo systemctl disable node-app
+
+-------
+React:
+
 빌드 파일 확인
 cd ~/my-project/build/
 
