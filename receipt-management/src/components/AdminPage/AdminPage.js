@@ -45,6 +45,7 @@ const AdminPage = () => {
     { code: "YS", name: "영성수련회" },
     { code: "BQF", name: "성경퀴즈대회 설명회" },
     { code: "BQ", name: "성경퀴즈대회" },
+    { code: "YMS", name: "YM Summit" },
     { code: "AMC", name: "컨퍼런스" },
     { code: "BT1", name: "상반기 비티" },
     { code: "BT2", name: "하반기 비티" },

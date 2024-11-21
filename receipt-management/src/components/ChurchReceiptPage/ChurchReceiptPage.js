@@ -10,6 +10,7 @@ const eventCodeMapping = {
   YS: "영성수련회",
   BQF: "성경퀴즈대회 설명회",
   BQ: "성경퀴즈대회",
+  YMS: "YM Summit",
   AMC: "컨퍼런스",
   BT1: "상반기 비티",
   BT2: "하반기 비티",
