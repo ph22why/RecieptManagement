@@ -23,8 +23,8 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 
 const BASE_URL =
   process.env.NODE_ENV === "production"
-    ? "http://www.awanaevent.com"
-    : "http://localhost";
+    ? "https://awanaevent.com"
+    : "http://localhost:8080";
 
 const AdminEventPage = () => {
   const [events, setEvents] = useState([]);
@@ -63,7 +63,7 @@ const AdminEventPage = () => {
   // 이벤트 목록을 가져오는 함수
   const fetchEvents = async () => {
     try {
-      const response = await fetch(`${BASE_URL}:8080/admin/events`);
+      const response = await fetch(`${BASE_URL}/admin/events`);
       const data = await response.json();
       setEvents(data);
     } catch (error) {
@@ -74,7 +74,7 @@ const AdminEventPage = () => {
   // 교회 목록을 가져오는 함수
   const fetchChurches = async () => {
     try {
-      const response = await fetch(`${BASE_URL}:8080/admin/churches`);
+      const response = await fetch(`${BASE_URL}/admin/churches`);
       const data = await response.json();
 
       // 교회 데이터가 배열인지 확인 후 설정
@@ -105,7 +105,7 @@ const AdminEventPage = () => {
         return;
       }
 
-      const response = await fetch(`${BASE_URL}:8080/admin/events`, {
+      const response = await fetch(`${BASE_URL}/admin/events`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -147,7 +147,7 @@ const AdminEventPage = () => {
   const handleDeleteEvent = async () => {
     try {
       const response = await fetch(
-        `${BASE_URL}:8080/admin/events/${selectedEventId}`,
+        `${BASE_URL}/admin/events/${selectedEventId}`,
         {
           method: "DELETE",
         }
@@ -185,7 +185,7 @@ const AdminEventPage = () => {
     formData.append("event_name", selectedEvent.event_name);
 
     try {
-      const response = await fetch(`${BASE_URL}:8080/admin/uploadExcel`, {
+      const response = await fetch(`${BASE_URL}/admin/uploadExcel`, {
         method: "POST",
         body: formData,
       });

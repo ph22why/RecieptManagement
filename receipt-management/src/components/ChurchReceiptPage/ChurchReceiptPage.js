@@ -3,8 +3,8 @@ import moment from "moment";
 
 const BASE_URL =
   process.env.NODE_ENV === "production"
-    ? "http://www.awanaevent.com"
-    : "http://localhost";
+    ? "https://awanaevent.com"
+    : "http://localhost:8080";
 
 const eventCodeMapping = {
   YS: "영성수련회",
@@ -39,7 +39,7 @@ const ChurchReceiptPage = () => {
   useEffect(() => {
     const fetchEvents = async () => {
       try {
-        const response = await fetch(`${BASE_URL}:8080/admin/events`);
+        const response = await fetch(`${BASE_URL}/admin/events`);
         const data = await response.json();
 
         setEvents(data);
@@ -71,7 +71,7 @@ const ChurchReceiptPage = () => {
       }
 
       const response = await fetch(
-        `${BASE_URL}:8080/public/events/custom-search?${queryParam}&eventYear=${selectedYear}&eventName=${selectedEvent}`
+        `${BASE_URL}/public/events/custom-search?${queryParam}&eventYear=${selectedYear}&eventName=${selectedEvent}`
       );
 
       if (!response.ok) {
@@ -98,7 +98,7 @@ const ChurchReceiptPage = () => {
   //     }
 
   //     const response = await fetch(
-  //       `${BASE_URL}:8080/public/events/search?${queryParam}`
+  //       `${BASE_URL}/public/events/search?${queryParam}`
   //     );
 
   //     if (!response.ok) {

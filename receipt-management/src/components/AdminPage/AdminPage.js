@@ -21,8 +21,8 @@ import * as XLSX from "xlsx";
 
 const BASE_URL =
   process.env.NODE_ENV === "production"
-    ? "http://www.awanaevent.com"
-    : "http://localhost";
+    ? "https://awanaevent.com"
+    : "http://localhost:8080";
 
 const AdminPage = () => {
   const [events, setEvents] = useState([]);
@@ -64,7 +64,7 @@ const AdminPage = () => {
   // 서버에서 이벤트 목록을 가져오는 함수
   const fetchEvents = async () => {
     try {
-      const response = await fetch(`${BASE_URL}:8080/admin/events`);
+      const response = await fetch(`${BASE_URL}/admin/events`);
       const data = await response.json();
       setEvents(data);
     } catch (error) {
@@ -89,7 +89,7 @@ const AdminPage = () => {
   const handleSetPublic = async (eventId, isPublic) => {
     try {
       const response = await fetch(
-        `${BASE_URL}:8080/admin/events/${eventId}/public`,
+        `${BASE_URL}/admin/events/${eventId}/public`,
         {
           method: "PUT",
           headers: {
@@ -125,7 +125,7 @@ const AdminPage = () => {
 
     try {
       const response = await fetch(
-        `${BASE_URL}:8080/admin/events/${selectedEvent.id}/data/${editRow.id}`,
+        `${BASE_URL}/admin/events/${selectedEvent.id}/data/${editRow.id}`,
         {
           method: "PUT",
           headers: {
@@ -155,7 +155,7 @@ const AdminPage = () => {
   const fetchEventData = async (eventId) => {
     try {
       const response = await fetch(
-        `${BASE_URL}:8080/admin/events/${eventId}/data`
+        `${BASE_URL}/admin/events/${eventId}/data`
       );
       const data = await response.json();
 
@@ -223,7 +223,7 @@ const AdminPage = () => {
   const handleDeleteRow = async (rowId) => {
     try {
       const response = await fetch(
-        `${BASE_URL}:8080/admin/events/${selectedEvent.id}/data/${rowId}`,
+        `${BASE_URL}/admin/events/${selectedEvent.id}/data/${rowId}`,
         {
           method: "DELETE",
         }
@@ -273,7 +273,7 @@ const AdminPage = () => {
   const handleSaveNewRow = async () => {
     try {
       const response = await fetch(
-        `${BASE_URL}:8080/admin/events/${selectedEvent.id}/data`,
+        `${BASE_URL}/admin/events/${selectedEvent.id}/data`,
         {
           method: "POST",
           headers: {

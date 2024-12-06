@@ -12,7 +12,7 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // DB 설정
-const dbPath = path.resolve(__dirname, "churches.db");
+const dbPath = path.resolve(__dirname, "./churches.db");
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
     console.error("Error opening database:", err);
@@ -50,7 +50,421 @@ const db = new sqlite3.Database(dbPath, (err) => {
   }
 });
 
+// 등록 관련 함수
+// 테이블 존재 여부 확인 및 생성 함수
+const ensureTableExists = async (tableName) => {
+  const createTableQuery = `
+    CREATE TABLE IF NOT EXISTS ${tableName} (
+      id INTEGER NOT NULL,
+      region TEXT,
+      church_number TEXT,
+      church_name TEXT,
+      representative TEXT,
+      contact TEXT,
+      category TEXT,
+      handbook TEXT,
+      player_name TEXT,
+      coach_name TEXT,
+      coach_contact TEXT,
+      observer_name TEXT UNIQUE,
+      observer_count INTEGER DEFAULT 0,
+      has_meal INTEGER DEFAULT 0,
+      has_pin INTEGER DEFAULT 0,
+      PRIMARY KEY (id, category)
+    )
+  `;
+
+  // 테이블 생성
+  await new Promise((resolve, reject) => {
+    db.run(createTableQuery, (err) => {
+      if (err) {
+        console.error(`Error creating table ${tableName}:`, err.message);
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+
+  // 필요한 컬럼 확인 및 추가
+  const requiredColumns = [
+    { name: "region", type: "TEXT" },
+    { name: "representative", type: "TEXT" },
+    { name: "church_number", type: "TEXT" },
+    { name: "contact", type: "TEXT" },
+    { name: "category", type: "TEXT" },
+    { name: "handbook", type: "TEXT" },
+  ];
+
+  for (const { name, type } of requiredColumns) {
+    await new Promise((resolve, reject) => {
+      const alterQuery = `ALTER TABLE ${tableName} ADD COLUMN ${name} ${type}`;
+      db.run(alterQuery, (err) => {
+        if (err && !err.message.includes("duplicate column name")) {
+          console.error(
+            `Error adding column "${name}" to table "${tableName}":`,
+            err.message
+          );
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+};
+
+// 기존 데이터 가져오기 함수
+const fetchTableData = (tableName) => {
+  return new Promise((resolve, reject) => {
+    const selectQuery = `SELECT * FROM ${tableName}`;
+    db.all(selectQuery, (err, rows) => {
+      if (err) {
+        if (err.message.includes("no such table")) {
+          console.log(`Table "${tableName}" does not exist.`);
+          resolve([]);
+        } else {
+          console.error(`Error fetching data from ${tableName}:`, err.message);
+          reject(err);
+        }
+      } else {
+        resolve(rows);
+      }
+    });
+  });
+};
+
+// 분리 로직
+const processFetchedData = (rows) => {
+  const basicInfoRow = rows.find((row) => row.category === "basicInfo");
+  const basicInfo = basicInfoRow
+    ? {
+        id: basicInfoRow.id,
+        region: basicInfoRow.region || "",
+        church_number: basicInfoRow.church_number || "",
+        church_name: basicInfoRow.church_name || "",
+        representative: basicInfoRow.representative || "",
+        contact: basicInfoRow.contact || "",
+      }
+    : null;
+  const sparksList = rows.filter((row) => row.category === "Sparks");
+  const ttList = rows.filter((row) => row.category === "T&T");
+  const observers = rows.filter((row) => row.category === "Observer");
+  // console.log("Filtered basicInfoRow:", basicInfoRow);
+  // console.log("Filtered Sparks:", sparksList);
+  // console.log("Filtered T&T:", ttList);
+  // console.log("Filtered Observers:", observers);
+
+  return { basicInfo, sparksList, ttList, observers };
+};
+
+// 데이터 삽입 또는 업데이트 함수
+const insertOrUpdateTableData = (tableName, values) => {
+  return new Promise((resolve, reject) => {
+    // SELECT 쿼리로 id와 category 조합 확인
+    const selectQuery = `SELECT COUNT(*) as count FROM ${tableName} WHERE id = ? AND category = ?`;
+
+    // INSERT 쿼리
+    const insertQuery = `
+      INSERT INTO ${tableName} (
+        id, region, church_number, church_name, representative, contact, category,
+        handbook, player_name, coach_name, coach_contact,
+        observer_name, observer_count, has_meal, has_pin
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+
+    // UPDATE 쿼리
+    const updateQuery = `
+      UPDATE ${tableName}
+      SET
+        region = COALESCE(?, region),
+        church_number = COALESCE(?, church_number),
+        church_name = COALESCE(?, church_name),
+        representative = COALESCE(?, representative),
+        contact = COALESCE(?, contact),
+        category = COALESCE(?, category),
+        handbook = COALESCE(?, handbook),
+        player_name = COALESCE(?, player_name),
+        coach_name = COALESCE(?, coach_name),
+        coach_contact = COALESCE(?, coach_contact),
+        observer_name = COALESCE(?, observer_name),
+        observer_count = COALESCE(?, observer_count),
+        has_meal = COALESCE(?, has_meal),
+        has_pin = COALESCE(?, has_pin)
+      WHERE id = ? AND category = ?
+    `;
+
+    const isObserver = values.category === "Observer";
+    const isBasicInfo = values.category === "basicInfo";
+
+    const insertValues = isObserver
+      ? [
+          values.id || null,
+          values.region || null, // region
+          values.church_number || null, // church_number
+          values.church_name || null, // church_name
+          null, // representative
+          null, // contact
+          "Observer",
+          null, // handbook
+          null, // player_name
+          null, // coach_name
+          null, // coach_contact
+          values.observer_name || null,
+          values.observer_count || 0,
+          values.has_meal ? 1 : 0,
+          values.has_pin ? 1 : 0,
+        ]
+      : isBasicInfo
+      ? [
+          values.id || 1000,
+          values.region || null, // region
+          values.church_number || null, // church_number
+          values.church_name || null, // church_name
+          values.representative || null, // representative
+          values.contact || null, // contact
+          "basicInfo", // category 지정
+          null, // handbook
+          null, // player_name
+          null, // coach_name
+          null, // coach_contact
+          null, // observer_name
+          null, // observer_count
+          null, // has_meal
+          null, // has_pin
+        ]
+      : [
+          values.id || null,
+          values.region || null,
+          values.church_number || null,
+          values.church_name || null,
+          values.representative || null,
+          values.contact || null,
+          values.category || null, // Sparks or T&T
+          values.handbook || null,
+          values.player_name || null,
+          values.coach_name || null,
+          values.coach_contact || null,
+          null, // observer_name
+          null, // observer_count
+          values.has_meal ? 1 : 0,
+          values.has_pin ? 1 : 0,
+        ];
+
+    const updateValues = [
+      values.region || null,
+      values.church_number || null,
+      values.church_name || null,
+      values.representative || null,
+      values.contact || null,
+      values.category || null,
+      values.handbook || null,
+      values.player_name || null,
+      values.coach_name || null,
+      values.coach_contact || null,
+      values.observer_name || null,
+      values.observer_count || null,
+      values.has_meal ? 1 : 0,
+      values.has_pin ? 1 : 0,
+      values.id || null,
+      values.category, // WHERE 조건용
+    ];
+
+    // SELECT 쿼리 실행
+    db.get(selectQuery, [values.id, values.category], (err, row) => {
+      if (err) {
+        console.error(`Error checking data in ${tableName}:`, err.message);
+        return reject(err);
+      }
+
+      const exists = row.count > 0;
+
+      if (exists) {
+        // 데이터가 이미 존재하면 업데이트
+        db.run(updateQuery, updateValues, function (updateErr) {
+          if (updateErr) {
+            console.error(
+              `Error updating data in ${tableName}:`,
+              updateErr.message
+            );
+            return reject(updateErr);
+          }
+          resolve();
+        });
+      } else {
+        // 데이터가 없으면 삽입
+        db.run(insertQuery, insertValues, function (insertErr) {
+          if (insertErr) {
+            console.error(
+              `Error inserting data into ${tableName}:`,
+              insertErr.message
+            );
+            return reject(insertErr);
+          }
+          resolve();
+        });
+      }
+    });
+  });
+};
+
 // API endpoints
+// POST API: 데이터 저장
+app.post("/submit-registration/:tableName", async (req, res) => {
+  const { tableName } = req.params;
+  const { basicInfo, sparksParticipants, ttParticipants, observers } = req.body;
+
+  try {
+    await ensureTableExists(tableName);
+
+    const saveBasicInfo = async (basicInfo) => {
+      const values = {
+        id: 1000 || null,
+        region: basicInfo.region || null,
+        church_number: basicInfo.church_number || null,
+        church_name: basicInfo.church_name || null,
+        representative: basicInfo.representative || null,
+        contact: basicInfo.contact || null,
+        category: "basicInfo",
+      };
+      // console.log(`Saving basicInfo participant:`, values);
+      await insertOrUpdateTableData(tableName, values);
+    };
+
+    const saveParticipants = async (participants, category) => {
+      for (const participant of participants) {
+        const values = {
+          id: participant.id || null,
+          region: null,
+          church_number: null,
+          church_name: participant.churchName || null,
+          representative: participant.representative || null,
+          contact: participant.contact || null,
+          category, // 명시적으로 카테고리 지정
+          handbook: participant.handbook || null,
+          player_name: participant.playerName || null,
+          coach_name: participant.coachName || null,
+          coach_contact: participant.coachContact || null,
+          observer_name: null,
+          observer_count: null,
+          has_meal: 0,
+          has_pin: 0,
+        };
+        // console.log(`Saving ${category} participant:`, values); // 디버깅 로그
+        await insertOrUpdateTableData(tableName, values);
+      }
+    };
+
+    // 카테고리별로 처리
+    await saveBasicInfo(basicInfo);
+    await saveParticipants(sparksParticipants, "Sparks");
+    await saveParticipants(ttParticipants, "T&T");
+
+    for (const observer of observers) {
+      const values = {
+        id: observer.id || null,
+        category: "Observer",
+        observer_name: observer.observerName || null,
+        observer_count: observer.observerCount || 0,
+        has_meal: observer.hasMeal ? 1 : 0,
+        has_pin: observer.hasPin ? 1 : 0,
+      };
+      // console.log("Saving Observer:", values); // 디버깅 로그
+      await insertOrUpdateTableData(tableName, values);
+    }
+
+    res.status(201).json({ message: "Registration data saved successfully!" });
+  } catch (err) {
+    console.error("Error saving registration data:", err.message);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
+// POST /register/check-table
+app.post("/register/check-table", (req, res) => {
+  const { tableName } = req.body;
+
+  if (!tableName) {
+    return res.status(400).json({ error: "Table name is required" });
+  }
+
+  const createTableSQL = `
+  CREATE TABLE IF NOT EXISTS ${tableName} (
+    id INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    handbook TEXT,
+    church_name TEXT,
+    player_name TEXT,
+    coach_name TEXT,
+    coach_contact TEXT,
+    observer_name TEXT,
+    observer_count INTEGER DEFAULT 0,
+    has_meal INTEGER DEFAULT 0,
+    has_pin INTEGER DEFAULT 0,
+    PRIMARY KEY (id, category)
+  )
+`;
+
+  const checkTableSQL = `
+    SELECT name FROM sqlite_master WHERE type='table' AND name=?;
+  `;
+
+  db.get(checkTableSQL, [tableName], (err, row) => {
+    if (err) {
+      console.error("Error checking table existence:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+
+    if (row) {
+      // 테이블이 이미 존재하는 경우
+      return res.json({ status: "table_exists" });
+    }
+
+    // 테이블이 없으므로 새로 생성
+    db.run(createTableSQL, (err) => {
+      if (err) {
+        console.error("Error creating table:", err);
+        return res.status(500).json({ error: "Error creating table" });
+      }
+
+      return res.json({ status: "table_created" });
+    });
+  });
+});
+
+app.get("/register/:tableName", async (req, res) => {
+  const { tableName } = req.params;
+
+  try {
+    const rows = await fetchTableData(tableName); // 모든 데이터 조회
+    const { basicInfo, sparksList, ttList, observers } =
+      processFetchedData(rows); // 분리 로직 호출
+
+    res.status(200).json({ basicInfo, sparksList, ttList, observers });
+  } catch (err) {
+    console.error("Error fetching registration data:", err.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// 삭제처리
+app.delete("/delete-participant/:tableName/:id", (req, res) => {
+  const { tableName, id } = req.params;
+
+  const deleteQuery = `DELETE FROM ${tableName} WHERE id = ?`;
+
+  db.run(deleteQuery, [id], function (err) {
+    if (err) {
+      console.error(
+        `Error deleting participant from ${tableName}:`,
+        err.message
+      );
+      return res.status(500).json({ error: "Failed to delete participant." });
+    }
+
+    res.status(200).json({ message: "Participant deleted successfully." });
+  });
+});
 
 // 이벤트 목록 가져오기
 app.get("/admin/events", (req, res) => {
