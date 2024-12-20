@@ -3,6 +3,7 @@ const cors = require("cors");
 const bodyParser = require("body-parser");
 const sqlite3 = require("sqlite3").verbose();
 const path = require("path");
+const fs = require("fs");
 const multer = require("multer");
 const xlsx = require("xlsx");
 const upload = multer({ dest: "uploads/" });
@@ -10,6 +11,8 @@ const upload = multer({ dest: "uploads/" });
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+// 정적 파일 서빙
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // DB 설정
 const dbPath = path.resolve(__dirname, "./churches.db");
@@ -50,6 +53,576 @@ const db = new sqlite3.Database(dbPath, (err) => {
   }
 });
 
+// 동적으로 이벤트별 테이블 생성
+const createEventTable = (eventName) => {
+  // 테이블 존재 여부를 확인한 후, 필요한 경우 생성
+  db.get(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
+    [`${eventName}_players`],
+    (err, row) => {
+      if (err) {
+        console.error("Error checking table existence:", err);
+        return;
+      }
+      if (row) {
+        // 테이블이 이미 존재하면 바로 종료
+        // console.log(`${eventName}_players 테이블 이미 존재`);
+        return; // 함수 종료
+      }
+      if (!row) {
+        db.run(
+          `
+          CREATE TABLE "${eventName}_players" (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            type_id INTEGER,
+            player_name TEXT, 
+            church_name TEXT, 
+            photo_path TEXT, 
+            approved INTEGER DEFAULT 0, 
+            type TEXT,
+            rejection_reason TEXT DEFAULT NULL,
+            region TEXT
+          )
+        `,
+          (createErr) => {
+            if (createErr) {
+              console.error("Error creating table:", createErr);
+            } else {
+              // console.log(`${eventName}_players 테이블 생성 완료`);
+            }
+          }
+        );
+      }
+    }
+  );
+};
+
+const getMatchingTables = (eventPrefix) => {
+  return new Promise((resolve, reject) => {
+    // SQLite의 시스템 테이블에서 테이블 이름을 조회
+    db.all(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name LIKE ?`,
+      [`${eventPrefix}\_%\_players`],
+      (err, rows) => {
+        if (err) {
+          console.error("Error fetching table names:", err);
+          return reject(err);
+        }
+        // 테이블 이름만 추출하여 반환
+        const tableNames = rows.map((row) => row.name);
+        resolve(tableNames);
+      }
+    );
+  });
+};
+
+// 승인 및 반려 데이터 조회 앤드포인트
+app.get("/admin/events/:table/approve-data", (req, res) => {
+  const { table } = req.params; // 테이블 이름 추출
+
+  // 테이블에서 모든 데이터 조회
+  db.all(`SELECT * FROM "${table}"`, [], (err, rows) => {
+    if (err) {
+      // console.error("자료 신규등록 교회:", table);
+      return res
+        .status(500)
+        .json({ message: "선수 데이터를 가져오는 중 오류가 발생했습니다." });
+    }
+    res.status(200).json(rows); // 데이터 반환
+  });
+});
+
+// 교회별 자료 가져오기 엔드포인트
+app.get("/admin/events/:event/player-data", async (req, res) => {
+  const { event } = req.params; // URL에서 event 추출
+
+  try {
+    const tables = await getMatchingTables(event); // 관련 테이블 이름 조회
+    const allData = [];
+    for (const table of tables) {
+      const rows = await new Promise((resolve, reject) => {
+        db.all(`SELECT * FROM "${table}"`, [], (err, rows) => {
+          if (err) {
+            return reject(err);
+          }
+          resolve(rows);
+        });
+      });
+      allData.push(...rows);
+    }
+
+    res.status(200).json(allData); // 모든 테이블의 데이터 반환
+    // console.log(allData);
+  } catch (error) {
+    // console.error("Error fetching player data:", error);
+    res
+      .status(500)
+      .json({ message: "선수 자료를 가져오는 중 오류가 발생했습니다." });
+  }
+});
+
+app.post(
+  "/admin/:event/upload/:type/:id",
+  upload.single("photo"),
+  (req, res) => {
+    const { event, type, id } = req.params; // URL에서 전달된 event, type(sparks/tt)과 id 추출
+    // console.log("요청 정보:", event, type, id);
+    const filePath = req.file.path; // 업로드된 임시 파일 경로
+    const fileExtension = path.extname(req.file.originalname); // 원본 파일 확장자 추출
+    const newFilePath = `uploads/${event}_${type}_${id}${fileExtension}`; // 저장될 새로운 파일 경로
+
+    // 요청 본문에서 데이터 추출
+    const {
+      player_name: playerName,
+      church_name: churchName,
+      region,
+    } = req.body; // player_name과 church_name 추출
+
+    // 테이블이 없으면 생성
+    createEventTable(event);
+
+    // 파일 이름 변경 및 경로 업데이트
+    fs.rename(filePath, newFilePath, (err) => {
+      if (err) {
+        console.error("Error renaming file:", err); // 파일 이름 변경 중 에러 처리
+        return res.status(500).json({ message: "파일 업로드 실패" }); // 실패 응답 반환
+      }
+
+      // 데이터베이스에 데이터 삽입 또는 업데이트
+      // console.log(
+      //   `쿼리 실행: SELECT * FROM "${event}_players" WHERE id = ${id} AND type = ${type}`
+      // );
+      // console.log(
+      //   "type 데이터 유형:",
+      //   typeof type,
+      //   "id 데이터 유형:",
+      //   typeof id
+      // );
+      db.get(
+        `SELECT * FROM "${event}_players" WHERE type_id = ? AND type = ?`,
+        [parseInt(id, 10), type.trim()],
+        (err, row) => {
+          if (err) {
+            console.error("Error fetching max type_id:", err); // 기존 데이터 확인 중 에러 처리
+            return res.status(500).json({ message: "데이터베이스 오류" });
+          }
+
+          if (row) {
+            // console.log("데이터 있음", row);
+            // 기존 데이터가 있는 경우 업데이트
+            db.run(
+              `UPDATE "${event}_players" 
+               SET player_name = ?, church_name = ?, photo_path = ?, approved = 0, region = ? 
+               WHERE type_id = ? AND type = ?`,
+              [playerName, churchName, newFilePath, region, id, type],
+              (updateErr) => {
+                if (updateErr) {
+                  console.error("Error updating player data:", updateErr); // 업데이트 중 에러 처리
+                  return res
+                    .status(500)
+                    .json({ message: "데이터 업데이트 실패" });
+                }
+                // console.log("Player data updated successfully.");
+                res
+                  .status(200)
+                  .json({ message: "사진 업로드 및 데이터 업데이트 성공" });
+              }
+            );
+          } else {
+            // 기존 데이터가 없으면 새로 삽입
+            // console.log("기존 데이터가 없으면 새로 삽입");
+            // 새로운 type_id 생성
+            db.get(
+              `SELECT MAX(type_id) as maxTypeId FROM "${event}_players" WHERE type = ?`,
+              [type.trim()],
+              (maxErr, maxRow) => {
+                if (maxErr) {
+                  console.error("Error fetching max type_id:", maxErr); // 최대 type_id 확인 중 에러 처리
+                  return res.status(500).json({ message: "데이터베이스 오류" });
+                }
+                const typeId = (maxRow?.maxTypeId || 0) + 1; // 새로운 type_id 계산
+                // 데이터 삽입
+                db.run(
+                  `INSERT INTO "${event}_players" 
+                  (type_id, player_name, church_name, photo_path, approved, type, region) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                  [
+                    typeId,
+                    playerName,
+                    churchName,
+                    newFilePath,
+                    0,
+                    type,
+                    region,
+                  ],
+                  (insertErr) => {
+                    if (insertErr) {
+                      console.error("Error inserting player data:", insertErr); // 삽입 중 에러 처리
+                      return res
+                        .status(500)
+                        .json({ message: "데이터 삽입 실패" });
+                    }
+                    // console.log("Player data inserted successfully.");
+                    res
+                      .status(200)
+                      .json({ message: "사진 업로드 및 데이터 삽입 성공" });
+                  }
+                );
+              }
+            );
+          }
+        }
+      );
+    });
+  }
+);
+
+// 승인 상태 변경 엔드포인트(승인)
+app.post("/admin/approve", (req, res) => {
+  const { photo_path, church_name, player_name } = req.body;
+
+  if (!photo_path) {
+    console.error("photo_path is undefined or empty");
+    return res.status(400).json({ message: "Invalid photo_path provided" });
+  }
+
+  try {
+    const fileName = path.basename(photo_path);
+    const fileNameWithoutExt = fileName.split(".").slice(0, -1).join(".");
+    const parts = fileNameWithoutExt.split("_");
+    if (parts.length < 5) {
+      throw new Error("Invalid photo_path format: not enough parts");
+    }
+
+    const eventPart = parts.slice(0, 4).join("_");
+    const type = parts[4];
+    const id = parts[5];
+    const tableName = `${eventPart}_players`;
+
+    if (!type || !id || isNaN(id)) {
+      throw new Error("Invalid type or id in photo_path");
+    }
+
+    const newFileName = `${church_name}_${player_name}${path.extname(
+      photo_path
+    )}`;
+    const filePath = path.join(__dirname, photo_path);
+
+    // 파일 다운로드
+    res.download(filePath, newFileName, (err) => {
+      if (err) {
+        console.error("Error downloading file:", err);
+        return res.status(500).json({ message: "파일 다운로드 실패" });
+      }
+
+      // 파일 삭제 및 승인 상태 업데이트
+      fs.unlink(filePath, (unlinkErr) => {
+        if (unlinkErr) {
+          console.error("Error deleting file:", unlinkErr);
+          return; // 파일 삭제 실패 시 추가 처리는 생략
+        }
+
+        // 승인 상태 업데이트
+        db.run(
+          `UPDATE "${tableName}" SET approved = 1, photo_path = NULL WHERE type_id = ? AND type = ?`,
+          [id, type],
+          (updateErr) => {
+            if (updateErr) {
+              console.error("Error updating approval status:", updateErr);
+            } else {
+              // console.log("Approval status updated successfully.");
+            }
+          }
+        );
+      });
+    });
+  } catch (error) {
+    console.error("Error processing photo_path:", error.message);
+    res
+      .status(400)
+      .json({ message: `Invalid photo_path format: ${error.message}` });
+  }
+});
+
+// 승인 상태 변경 엔드포인트(반려)
+app.post("/admin/reject", (req, res) => {
+  const { id, rejection_reason, photo_path } = req.body;
+
+  if (!photo_path) {
+    console.error("photo_path is undefined or empty");
+    return res.status(400).json({ message: "Invalid photo_path provided" });
+  }
+
+  try {
+    // 파일명 파싱
+    const fileName = path.basename(photo_path);
+    const fileNameWithoutExt = fileName.split(".").slice(0, -1).join(".");
+    const parts = fileNameWithoutExt.split("_");
+
+    if (parts.length < 5) {
+      throw new Error("Invalid photo_path format: not enough parts");
+    }
+
+    const eventPart = parts.slice(0, 4).join("_"); // 코드, 연도, 등록번호3자리, 8자리번호
+    const type = parts[4]; // type 추출
+    const tableName = `${eventPart}_players`; // 테이블 이름 생성
+
+    // console.log("Generated tableName:", tableName);
+    // console.log("Extracted type:", type);
+
+    // 반려 사유 업데이트
+    db.run(
+      `UPDATE "${tableName}" SET rejection_reason = ?, approved = 0 WHERE type_id = ? AND type = ?`,
+      [rejection_reason, id, type],
+      function (err) {
+        if (err) {
+          console.error("Error updating rejection reason:", err);
+          return res.status(500).json({ message: "반려 처리 실패" });
+        }
+        res.status(200).json({ message: "반려 처리 성공" });
+      }
+    );
+  } catch (error) {
+    console.error("Error processing photo_path:", error.message);
+    res
+      .status(400)
+      .json({ message: `Invalid photo_path format: ${error.message}` });
+  }
+});
+
+// 선수 목록 조회 엔드포인트
+app.get("/admin/:event/check", (req, res) => {
+  const { event } = req.params; // URL에서 event 추출
+
+  // 데이터베이스에서 이벤트별 선수 데이터 조회
+  db.all(
+    `SELECT id, player_name AS playerName, church_name AS churchName, approved, type FROM "${event}_players"`,
+    [],
+    (err, rows) => {
+      if (err) {
+        console.error("Error fetching data:", err); // 데이터 조회 중 에러 처리
+        return res.status(500).json({ message: "데이터 조회 실패" });
+      }
+
+      // type별로 선수 데이터 분리
+      const sparksList = rows.filter((row) => row.type === "sparks"); // Sparks 데이터 필터링
+      const ttList = rows.filter((row) => row.type === "tt"); // T&T 데이터 필터링
+
+      res.status(200).json({ sparksList, ttList }); // JSON 형식으로 응답 반환
+    }
+  );
+});
+
+app.post("/admin/receipts/export", async (req, res) => {
+  try {
+    const { event_year, event_name } = req.body;
+    const tableNamePattern = `${event_name}_${event_year}%`;
+
+    // 테이블 이름 조회
+    const tablesQuery = `
+      SELECT name
+      FROM sqlite_master
+      WHERE type='table' AND name LIKE ?;
+    `;
+
+    const tables = await new Promise((resolve, reject) => {
+      db.all(tablesQuery, [tableNamePattern], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+
+    // 테이블 이름 확인
+    if (!tables.length) {
+      console.log("No matching tables found.");
+      return res
+        .status(404)
+        .json({ message: "조회 가능한 데이터 테이블이 없습니다." });
+    }
+
+    // console.log("Fetched tables:", tables);
+
+    // 테이블별 매핑 데이터
+    const mappedData = [];
+    const requiredColumns = [
+      { name: "totalcosts", type: "INTEGER", default: 0 },
+      { name: "representative", type: "TEXT", default: null },
+      { name: "contact", type: "TEXT", default: null },
+      { name: "church_name", type: "TEXT", default: null },
+    ];
+
+    for (const table of tables) {
+      const tableName = table.name;
+
+      // 1. 컬럼 존재 여부 확인
+      const columnInfoQuery = `PRAGMA table_info(${tableName});`;
+
+      const columns = await new Promise((resolve, reject) => {
+        db.all(columnInfoQuery, [], (err, rows) => {
+          if (err) {
+            console.error(
+              `Error fetching columns from ${tableName}:`,
+              err.message
+            );
+            reject(err);
+            return;
+          }
+          resolve(rows);
+        });
+      });
+
+      // 필요한 컬럼이 없으면 추가
+      for (const { name, type, default: defaultValue } of requiredColumns) {
+        const hasColumn = columns.some((col) => col.name === name);
+
+        if (!hasColumn) {
+          const addColumnQuery = `ALTER TABLE ${tableName} ADD COLUMN ${name} ${type} DEFAULT ${defaultValue};`;
+          await new Promise((resolve, reject) => {
+            db.run(addColumnQuery, [], (err) => {
+              if (err) {
+                console.error(
+                  `Error adding column '${name}' to ${tableName}:`,
+                  err.message
+                );
+                reject(err);
+                return;
+              }
+              // console.log(`Added '${name}' column to ${tableName}`);
+              resolve();
+            });
+          });
+        }
+      }
+
+      // 2. 기본 정보 조회
+      const tableDataQuery = `
+        SELECT church_name, representative, contact, totalcosts
+        FROM '${tableName}'
+        WHERE id='1000';
+      `;
+
+      const basicInfo = await new Promise((resolve, reject) => {
+        db.get(tableDataQuery, [], (err, row) => {
+          if (err) {
+            console.error(
+              `Error fetching data from ${tableName}:`,
+              err.message
+            );
+            reject(err);
+            return;
+          }
+          resolve(row || {});
+        });
+      });
+
+      // 3. CHURCHNUMBER 매핑
+      const churchNumberMatch = tableName.split("_")[2] || "N/A";
+
+      // 4. 매핑된 데이터 추가
+      mappedData.push({
+        CHURCHNUMBER: churchNumberMatch, // 테이블 이름에서 추출한 3번째 숫자
+        CHURCHNAME: basicInfo.church_name || "N/A",
+        LEADERNAME: basicInfo.representative || "N/A",
+        LEADERPHONE: basicInfo.contact || "N/A",
+        COST: basicInfo.totalcosts || 0,
+      });
+    }
+
+    // 매핑된 데이터 반환
+    // console.log("Mapped Data:", mappedData);
+    res.status(200).json(mappedData);
+  } catch (error) {
+    console.error("Error handling request:", error.message);
+    res
+      .status(500)
+      .json({ message: "An error occurred while processing the request." });
+  }
+});
+
+app.get("/admin/events/:eventName/registration-data", async (req, res) => {
+  const { eventName } = req.params;
+  const { year } = req.query;
+
+  if (!eventName || !year) {
+    return res.status(400).json({ error: "이벤트 이름과 연도가 필요합니다." });
+  }
+
+  try {
+    const tableNamePattern = `${eventName}_${year}_%`;
+
+    const checkTableSQL = `
+      SELECT name
+      FROM sqlite_master
+      WHERE type='table' AND name LIKE ?;
+    `;
+
+    const tables = await new Promise((resolve, reject) => {
+      db.all(checkTableSQL, [`${tableNamePattern}%`], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+
+    if (tables.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "조회 가능한 데이터 테이블이 없습니다." });
+    }
+
+    let sparksAndTTData = [];
+    let basicInfoMap = {};
+
+    for (const table of tables) {
+      const tableName = table.name;
+
+      // 테이블 이름에서 등록번호 추출
+      const churchNumber = tableName.split("_")[2] || "N/A";
+
+      const dataQuery = `SELECT * FROM ${tableName};`;
+      const tableData = await new Promise((resolve, reject) => {
+        db.all(dataQuery, [], (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows);
+        });
+      });
+
+      // basicInfo 데이터를 맵으로 저장
+      tableData
+        .filter((row) => row.category === "basicInfo")
+        .forEach((info) => {
+          basicInfoMap[info.church_name] = {
+            region: info.region || "정보 없음",
+            representative: info.representative || null,
+            contact: info.contact || null,
+            totalcosts: info.totalcosts || null,
+            churchNumber, // 등록번호 추가
+          };
+        });
+
+      // Sparks와 T&T 데이터 필터링
+      sparksAndTTData = sparksAndTTData.concat(
+        tableData.filter((row) => ["Sparks", "T&T"].includes(row.category))
+      );
+    }
+
+    // Sparks와 T&T 데이터에 참가지역 및 등록번호 추가
+    const enrichedData = sparksAndTTData.map((row) => ({
+      region: basicInfoMap[row.church_name]?.region || "정보 없음",
+      handbook: row.handbook,
+      church_name: row.church_name,
+      player_name: row.player_name,
+      coach_name: row.coach_name,
+      coach_contact: row.coach_contact,
+      church_number: basicInfoMap[row.church_name]?.churchNumber || "N/A", // 등록번호 추가
+    }));
+
+    res.status(200).json(enrichedData);
+  } catch (error) {
+    console.error("데이터 조회 중 오류 발생:", error.message);
+    res.status(500).json({ error: "Internal server error." });
+  }
+});
+
 // 등록 관련 함수
 // 테이블 존재 여부 확인 및 생성 함수
 const ensureTableExists = async (tableName) => {
@@ -61,6 +634,7 @@ const ensureTableExists = async (tableName) => {
       church_name TEXT,
       representative TEXT,
       contact TEXT,
+      totalcosts INTEGER DEFAULT 0,
       category TEXT,
       handbook TEXT,
       player_name TEXT,
@@ -94,6 +668,7 @@ const ensureTableExists = async (tableName) => {
     { name: "contact", type: "TEXT" },
     { name: "category", type: "TEXT" },
     { name: "handbook", type: "TEXT" },
+    { name: "totalcosts", type: "INTEGER DEFAULT 0" },
   ];
 
   for (const { name, type } of requiredColumns) {
@@ -167,10 +742,10 @@ const insertOrUpdateTableData = (tableName, values) => {
     // INSERT 쿼리
     const insertQuery = `
       INSERT INTO ${tableName} (
-        id, region, church_number, church_name, representative, contact, category,
+        id, region, church_number, church_name, representative, contact, totalcosts, category,
         handbook, player_name, coach_name, coach_contact,
         observer_name, observer_count, has_meal, has_pin
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     // UPDATE 쿼리
@@ -182,6 +757,7 @@ const insertOrUpdateTableData = (tableName, values) => {
         church_name = COALESCE(?, church_name),
         representative = COALESCE(?, representative),
         contact = COALESCE(?, contact),
+        totalcosts = COALESCE(?, totalcosts),
         category = COALESCE(?, category),
         handbook = COALESCE(?, handbook),
         player_name = COALESCE(?, player_name),
@@ -205,6 +781,7 @@ const insertOrUpdateTableData = (tableName, values) => {
           values.church_name || null, // church_name
           null, // representative
           null, // contact
+          null, // totalcosts
           "Observer",
           null, // handbook
           null, // player_name
@@ -223,6 +800,7 @@ const insertOrUpdateTableData = (tableName, values) => {
           values.church_name || null, // church_name
           values.representative || null, // representative
           values.contact || null, // contact
+          values.totalcosts ?? 0,
           "basicInfo", // category 지정
           null, // handbook
           null, // player_name
@@ -240,6 +818,7 @@ const insertOrUpdateTableData = (tableName, values) => {
           values.church_name || null,
           values.representative || null,
           values.contact || null,
+          null, // totalcosts
           values.category || null, // Sparks or T&T
           values.handbook || null,
           values.player_name || null,
@@ -257,6 +836,7 @@ const insertOrUpdateTableData = (tableName, values) => {
       values.church_name || null,
       values.representative || null,
       values.contact || null,
+      values.totalcosts ?? 0,
       values.category || null,
       values.handbook || null,
       values.player_name || null,
@@ -325,6 +905,7 @@ app.post("/submit-registration/:tableName", async (req, res) => {
         church_name: basicInfo.church_name || null,
         representative: basicInfo.representative || null,
         contact: basicInfo.contact || null,
+        totalcosts: basicInfo.totalcosts ?? null,
         category: "basicInfo",
       };
       // console.log(`Saving basicInfo participant:`, values);
@@ -813,6 +1394,54 @@ app.get("/admin/events/:eventId/data", (req, res) => {
       res.json(rows); // 조회된 데이터 반환
     });
   });
+});
+
+// 이벤트 초기화
+// 특정 이벤트의 데이터를 초기화하는 API
+app.delete("/admin/events/:eventId/reset-data", async (req, res) => {
+  const { eventId } = req.params;
+
+  if (!eventId) {
+    return res.status(400).json({ error: "이벤트 ID가 필요합니다." });
+  }
+
+  try {
+    // 이벤트 정보 가져오기
+    const query = "SELECT event_name, event_year FROM events WHERE id = ?";
+    const event = await new Promise((resolve, reject) => {
+      db.get(query, [eventId], (err, row) => {
+        if (err) reject(err);
+        else resolve(row);
+      });
+    });
+
+    if (!event) {
+      return res.status(404).json({ error: "해당 이벤트를 찾을 수 없습니다." });
+    }
+
+    // 테이블 이름 생성
+    const tableName = `${event.event_name}_${event.event_year}`
+      .replace(/\s+/g, "_")
+      .replace(/[^a-zA-Z0-9_]/g, "")
+      .toLowerCase();
+
+    // 해당 이벤트 데이터 초기화
+    const resetQuery = `DELETE FROM ${tableName}`;
+    await new Promise((resolve, reject) => {
+      db.run(resetQuery, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    console.log(
+      `Data for event ${event.event_name} (${event.event_year}) has been reset.`
+    );
+    res.status(200).json({ message: "이벤트 데이터가 초기화되었습니다." });
+  } catch (error) {
+    console.error("Error resetting event data:", error.message);
+    res.status(500).json({ error: "데이터 초기화 중 오류가 발생했습니다." });
+  }
 });
 
 // 데이터 수정 API (특정 이벤트의 특정 데이터 수정)

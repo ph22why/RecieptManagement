@@ -16,7 +16,7 @@ function App() {
         <Route path="/reciept" element={<ChurchReceiptPage />} />
         <Route path="/register" element={<ChurchRegisterPage />} />
         <Route path="/register/:eventCode" element={<EventFormRouter />} />
-        <Route path="/send" element={<SendFilePage />} />
+        <Route path="/check" element={<SendFilePage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/adminevent" element={<AdminEventPage />} />
       </Routes>

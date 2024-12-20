@@ -1,12 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  TextField,
-  MenuItem,
-  Button,
-  Typography,
-  Paper,
-} from "@mui/material";
+import { TextField, MenuItem, Button, Typography, Paper } from "@mui/material";
 
 const BASE_URL =
   process.env.NODE_ENV === "production"
@@ -59,6 +53,63 @@ const ChurchRegisterPage = () => {
     fetchEvents();
   }, []);
 
+  const handleCheckNavigation = async () => {
+    if (!selectedEvent) {
+      alert("이벤트를 선택해주세요.");
+      return;
+    }
+    if (!churchNumber || churchNumber.length !== 3) {
+      alert("3자리 교회등록번호를 입력해주세요.");
+      return;
+    }
+    if (!pinNumber || pinNumber.length !== 8) {
+      alert("핸드폰 뒤 8자리를 입력해주세요.");
+      return;
+    }
+
+    // 이벤트 코드와 연도를 찾기
+    const eventDetails = events.find(
+      (event) => event.event_name === selectedEvent
+    );
+    const eventCode = eventMapping.find(
+      (mapping) => mapping.code === selectedEvent
+    )?.code;
+    const eventYear = eventDetails?.event_year;
+
+    if (!eventCode || !eventYear) {
+      alert("이벤트 정보를 확인할 수 없습니다.");
+      return;
+    }
+
+    // 테이블명 생성
+    const fullPin = churchNumber + pinNumber; // 3자리 교회번호 + 8자리 핀번호
+    const tableName = `${eventCode}_${eventYear}_${churchNumber}_${pinNumber}`;
+
+    try {
+      // 백엔드에 테이블 확인 요청
+      const response = await fetch(`${BASE_URL}/register/check-table`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tableName }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to check the table.");
+      }
+
+      const data = await response.json();
+
+      if (data.status === "table_exists") {
+        navigate(`/check`, { state: { tableName } });
+      } else if (data.status === "table_created") {
+        alert("해당 교회의 신청 정보가 없습니다. 확인 후 다시 시도해주세요.");
+      }
+    } catch (error) {
+      console.error("Error checking table:", error.message);
+      alert("테이블 확인 중 오류가 발생했습니다. 다시 시도해주세요.");
+    }
+  };
+
   const handleEventSelection = async () => {
     if (!selectedEvent) {
       alert("이벤트를 선택해주세요.");
@@ -74,8 +125,12 @@ const ChurchRegisterPage = () => {
     }
 
     // 이벤트 코드와 연도를 찾기
-    const eventDetails = events.find((event) => event.event_name === selectedEvent);
-    const eventCode = eventMapping.find((mapping) => mapping.code === selectedEvent)?.code;
+    const eventDetails = events.find(
+      (event) => event.event_name === selectedEvent
+    );
+    const eventCode = eventMapping.find(
+      (mapping) => mapping.code === selectedEvent
+    )?.code;
     const eventYear = eventDetails?.event_year;
 
     if (!eventCode || !eventYear) {
@@ -185,11 +240,18 @@ const ChurchRegisterPage = () => {
         <Button
           variant="contained"
           color="primary"
-          fullWidth
           onClick={handleEventSelection}
           style={{ marginTop: "20px" }}
         >
-          신청 및 조회
+          신청 및 수정
+        </Button>
+        <Button
+          variant="contained"
+          color="primary"
+          onClick={handleCheckNavigation}
+          style={{ marginTop: "20px", marginLeft: "10%" }}
+        >
+          조회 및 자료제출
         </Button>
       </Paper>
     </div>

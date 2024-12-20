@@ -184,6 +184,7 @@ const BQForm = ({ tableName, fullPin }) => {
         representative: basicInfo.representative,
         contact: "010" + fullPin.substring(3),
         category: "basicInfo",
+        totalcosts,
       },
       sparksParticipants: sparksList.map((item) => ({
         id: item.id || null,
@@ -350,15 +351,19 @@ const BQForm = ({ tableName, fullPin }) => {
 
   const counts = {
     // Sparks 참가자 수
-    sparksPlayers: sparksList.length, // 분류1에서 입력받은 Sparks 선수 수
+    sparksPlayers: sparksList.filter(
+      (item) => item.playerName?.trim() // 이름이 공백이 아닌 경우만 포함
+    ).length,
     sparksCoaches: new Set(
       sparksList
         .filter((item) => item.coachName?.trim() && item.coachContact?.trim()) // 유효한 코치만 포함
         .map((item) => `${item.coachName}-${item.coachContact}`)
     ).size, // Sparks 코치 (중복 제거)
 
-    // T&T 참가자 수
-    ttPlayers: ttList.length, // 분류2에서 입력받은 T&T 선수 수
+    // T&T 참가자 수 (빈칸 제외)
+    ttPlayers: ttList.filter(
+      (item) => item.playerName?.trim() // 이름이 공백이 아닌 경우만 포함
+    ).length,
     ttCoaches: new Set(
       ttList
         .filter((item) => item.coachName?.trim() && item.coachContact?.trim()) // 유효한 코치만 포함
@@ -372,26 +377,20 @@ const BQForm = ({ tableName, fullPin }) => {
     ), // 분류3에서 입력받은 참관자 인원 합계
 
     // Sparks/T&T 코치 표식
-    sparksCoachMarkers:
-      parseInt(
-        new Set(
-          sparksList
-            .filter(
-              (item) => item.coachName?.trim() && item.coachContact?.trim()
-            ) // 유효한 코치만 포함
-            .map((item) => `${item.coachName}-${item.coachContact}`)
-        ).size
-      ) + parseInt(observers[1].count), // Sparks 코치 + Sparks 참관 교사 수
-    ttCoachMarkers:
-      parseInt(
-        new Set(
-          ttList
-            .filter(
-              (item) => item.coachName?.trim() && item.coachContact?.trim()
-            ) // 유효한 코치만 포함
-            .map((item) => `${item.coachName}-${item.coachContact}`)
-        ).size
-      ) + parseInt(observers[3].count), // T&T 코치 + T&T 참관 교사 수
+    sparksCoachMarkers: parseInt(
+      new Set(
+        sparksList
+          .filter((item) => item.coachName?.trim() && item.coachContact?.trim()) // 유효한 코치만 포함
+          .map((item) => `${item.coachName}-${item.coachContact}`)
+      ).size
+    ), // Sparks 코치
+    ttCoachMarkers: parseInt(
+      new Set(
+        ttList
+          .filter((item) => item.coachName?.trim() && item.coachContact?.trim()) // 유효한 코치만 포함
+          .map((item) => `${item.coachName}-${item.coachContact}`)
+      ).size
+    ), // T&T 코치 + T&T 참관 교사 수
 
     // Sparks 선수 핀 계산
     sparksPins: {
@@ -461,31 +460,48 @@ const BQForm = ({ tableName, fullPin }) => {
   };
 
   const items = calculateItems();
-  const costs = calculateCosts();
+  const totalcosts = calculateCosts();
 
   const handleBasicInfoChange = (e) => {
     const { name, value } = e.target;
-    setBasicInfo((prev) => ({ ...prev, [name]: value.replace(/\s+/g, ""), }));
+    setBasicInfo((prev) => ({ ...prev, [name]: value.replace(/\s+/g, "") }));
   };
 
   const handleSparksChange = (index, field, value) => {
     setSparksList((prevSparksList) =>
       prevSparksList.map((spark, i) =>
-        i === index ? { ...spark, [field]: value.replace(/\s+/g, ""), } : spark
+        i === index
+          ? {
+              ...spark,
+              [field]:
+                field === "handbook" // 리스트 선택 항목은 공백 제거 X
+                  ? value
+                  : value.replace(/\s+/g, ""), // 직접 입력 값의 공백 제거
+            }
+          : spark
       )
     );
   };
 
   const handleTtChange = (index, field, value) => {
     setTtList((prevTtList) =>
-      prevTtList.map((tt, i) => (i === index ? { ...tt, [field]: value.replace(/\s+/g, ""), } : tt))
+      prevTtList.map((tt, i) =>
+        i === index
+          ? {
+              ...tt,
+              [field]: field === "handbook" ? value : value.replace(/\s+/g, ""),
+            }
+          : tt
+      )
     );
   };
 
   const handleObserverChange = (index, field, value) => {
     setObservers((prevObservers) =>
       prevObservers.map((observer, i) =>
-        i === index ? { ...observer, [field]: value.replace(/\s+/g, ""), } : observer
+        i === index
+          ? { ...observer, [field]: value.replace(/\s+/g, "") }
+          : observer
       )
     );
   };
@@ -796,10 +812,12 @@ const BQForm = ({ tableName, fullPin }) => {
               최종 수령 품목 및 수량
             </Typography>
             <Typography color="#2e2e2e">
-              Sparks 참관핀: {items.sparkObserverPins}개
+              Sparks 참관핀:{" "}
+              {items.sparkObserverPins + parseInt(observers[1].count)}개
             </Typography>
             <Typography color="#2e2e2e">
-              T&T 참관핀: {items.ttObserverPins}개
+              T&T 참관핀: {items.ttObserverPins + parseInt(observers[3].count)}
+              개
             </Typography>
             <Typography color="#2e2e2e">
               Sparks 코치 표식: {counts.sparksCoachMarkers}개
@@ -841,7 +859,7 @@ const BQForm = ({ tableName, fullPin }) => {
               총 참가비
             </Typography>
             <Typography color="#2e2e2e">
-              {new Intl.NumberFormat().format(costs)}원
+              {new Intl.NumberFormat().format(totalcosts)}원
             </Typography>
           </Grid2>
         </Grid2>

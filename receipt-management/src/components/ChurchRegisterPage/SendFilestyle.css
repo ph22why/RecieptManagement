@@ -1,0 +1,9 @@
+@media print {
+    .page {
+      page-break-after: always; /* 각 .page 요소 뒤에 페이지 분리 */
+    }
+    .last-page {
+      page-break-after: auto; /* 마지막 페이지는 분리하지 않음 */
+    }
+  }
+  
